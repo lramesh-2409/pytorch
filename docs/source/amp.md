@@ -455,7 +455,6 @@ please file an issue. `float16` shares the lists of `bfloat16`.
 `cdist`,
 `trace`,
 `view_as_complex`,
-`cholesky`,
 `cholesky_inverse`,
 `cholesky_solve`,
 `inverse`,
