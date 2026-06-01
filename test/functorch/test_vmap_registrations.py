@@ -44,7 +44,6 @@ xfail_not_implemented = {
     "aten::bilinear",
     "aten::can_cast",
     "aten::cat.names",
-    "aten::chain_matmul",
     "aten::chalf",
     "aten::choose_qparams_optimized",
     "aten::clip_",
