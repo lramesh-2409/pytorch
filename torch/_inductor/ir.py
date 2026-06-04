@@ -10032,6 +10032,22 @@ class StorageBox(MutableBox):
         that is used multiple times.
         """
         if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
+            if isinstance(self.data, Pointwise):
+                for dep in self.data.get_reads():
+                    if not isinstance(dep, dependencies.MemoryDep):
+                        continue
+                    buffer = V.graph.try_get_buffer(dep.name)
+                    if not isinstance(buffer, CppTemplateBuffer):
+                        continue
+                    template = buffer.template
+                    if any(
+                        cls.__name__ == "CppGemmTemplate"
+                        for cls in type(template).__mro__
+                    ) and (
+                        len(template.input_nodes) >= 2
+                        and template.input_nodes[1].get_dtype() is torch.int8
+                    ):
+                        return True
             if is_cpu(self.data):
                 # Heuristic for realizing reused result of heavy ops on cpu
                 opcount = self.data.inner_fn_opcount()
