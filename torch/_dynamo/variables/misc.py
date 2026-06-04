@@ -61,6 +61,7 @@ from ..source import (
 from ..utils import (
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
+    get_fake_value,
     identity,
     istype,
     proxy_args_kwargs,
@@ -75,6 +76,40 @@ from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObject
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+
+_NUMPY_SCALAR_METADATA_CONSTANT_TYPES = (
+    bool,
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+    type(None),
+)
+
+
+def _safe_numpy_scalar_constructor_arg(arg: VariableTracker) -> object:
+    try:
+        import numpy as np
+    except ModuleNotFoundError:
+        return NO_SUCH_SUBOBJ
+
+    if arg.source is not None:
+        return NO_SUCH_SUBOBJ
+
+    if isinstance(arg, variables.NumpyNdarrayVariable):
+        value = arg.get_real_python_backed_value()
+        if isinstance(value, np.generic):
+            return value
+        return NO_SUCH_SUBOBJ
+
+    if isinstance(arg, ConstantVariable):
+        value = arg.as_python_constant()
+        if type(value) in _NUMPY_SCALAR_METADATA_CONSTANT_TYPES:
+            return value
+
+    return NO_SUCH_SUBOBJ
 
 
 class SuperVariable(VariableTracker):
@@ -1791,6 +1826,121 @@ class NumpyVariable(VariableTracker):
             )
         return np_constant_collections_map.get(fn)
 
+    def _python_scalar_value(
+        self, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> object:
+        try:
+            import numpy as np
+        except ModuleNotFoundError:
+            return NO_SUCH_SUBOBJ
+
+        if not (isinstance(self.value, type) and issubclass(self.value, np.generic)):
+            return NO_SUCH_SUBOBJ
+
+        python_args = []
+        for arg in args:
+            value = _safe_numpy_scalar_constructor_arg(arg)
+            if value is NO_SUCH_SUBOBJ:
+                return NO_SUCH_SUBOBJ
+            python_args.append(value)
+
+        python_kwargs = {}
+        for key, arg in kwargs.items():
+            value = _safe_numpy_scalar_constructor_arg(arg)
+            if value is NO_SUCH_SUBOBJ:
+                return NO_SUCH_SUBOBJ
+            python_kwargs[key] = value
+
+        try:
+            return self.value(*python_args, **python_kwargs)
+        except Exception:
+            return NO_SUCH_SUBOBJ
+
+    def _numpy_result_kinds(
+        self,
+        tx: "InstructionTranslatorBase",
+        proxy: torch.fx.Proxy,
+        python_value: object,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> bool:
+        try:
+            import numpy as np
+        except ModuleNotFoundError:
+            return False
+
+        if python_value is not NO_SUCH_SUBOBJ:
+            return False
+
+        if isinstance(self.value, type) and issubclass(self.value, np.generic):
+            fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+            if fake_value is None:
+                return False
+            if fake_value.ndim != 0:
+                return True
+            return False
+
+        if self.value in {
+            np.array,
+            np.asarray,
+            np.empty,
+            np.zeros,
+            np.ones,
+            np.full,
+        }:
+            return True
+
+        if not isinstance(self.value, np.ufunc):
+            fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+            if fake_value is None:
+                return False
+            if fake_value.ndim != 0:
+                return True
+            return False
+
+        def is_none(arg: VariableTracker) -> bool:
+            return (
+                isinstance(arg, ConstantVariable) and arg.as_python_constant() is None
+            )
+
+        if "out" in kwargs and not is_none(kwargs["out"]):
+            return True
+
+        if len(args) > self.value.nin and not is_none(args[self.value.nin]):
+            return True
+
+        fake_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+        if fake_value is None:
+            return False
+        if fake_value.ndim != 0:
+            return True
+        return False
+
+    def _numpy_ufunc_out_arg(
+        self, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> VariableTracker | None:
+        try:
+            import numpy as np
+        except ModuleNotFoundError:
+            return None
+
+        if not isinstance(self.value, np.ufunc):
+            return None
+
+        def is_none(arg: VariableTracker) -> bool:
+            return (
+                isinstance(arg, ConstantVariable) and arg.as_python_constant() is None
+            )
+
+        out_arg = kwargs.get("out")
+        if out_arg is None and len(args) > self.value.nin:
+            out_arg = args[self.value.nin]
+        if out_arg is None or is_none(out_arg):
+            return None
+        if isinstance(out_arg, variables.NumpyNdarrayVariable):
+            return out_arg
+        return None
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -1879,12 +2029,22 @@ class NumpyVariable(VariableTracker):
                 )
 
             # TODO Add all the functions that go from constants to constants to can_constant_fold_through
+            python_value = self._python_scalar_value(args, kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_to_tensor_wrapper(func),
                 *proxy_args_kwargs(args, kwargs),
             )
-            return NumpyNdarrayVariable.create(tx, proxy)
+            is_numpy_ndarray = self._numpy_result_kinds(
+                tx, proxy, python_value, args, kwargs
+            )
+            return NumpyNdarrayVariable.create(
+                tx,
+                proxy,
+                is_numpy_ndarray=is_numpy_ndarray,
+                numpy_identity_alias=self._numpy_ufunc_out_arg(args, kwargs),
+                python_value=python_value,
+            )
 
     def call_method(
         self,
