@@ -13,11 +13,9 @@ import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
-from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import sympy
-
 import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
@@ -62,6 +60,7 @@ from torch.utils._sympy.functions import (
     Mod,
     ModularIndexing,
 )
+from typing_extensions import ParamSpec
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -535,8 +534,9 @@ def _register_lowering(
 def register_lowering(
     aten_fn,
     broadcast=False,
-    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
-    | None = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind: (
+        ELEMENTWISE_TYPE_PROMOTION_KIND | None
+    ) = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
     lowering_dict=lowerings,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
@@ -1476,9 +1476,11 @@ def _register_unbacked_slice_size_bindings(dim, start, end, step, size):
     current_node = V.graph.current_node
     node_unbacked_bindings = resolve_unbacked_bindings(
         V.graph.sizevars.shape_env,
-        current_node.meta.get("unbacked_bindings", {})
-        if current_node is not None
-        else {},
+        (
+            current_node.meta.get("unbacked_bindings", {})
+            if current_node is not None
+            else {}
+        ),
     )
     sym_size, sym_storage = None, None
     if node_unbacked_bindings:
@@ -2894,11 +2896,15 @@ make_fallback(aten.randn_like, override_decomp=True)
 make_fallback(aten.randint_like, override_decomp=True)
 make_fallback(aten.rrelu_with_noise_functional)
 
-# TODO: mlazos reevaluate if we want to codegen something different
+# Registered as fallbacks so the cpp_wrapper / AOTI codegen path sees these
+# non-aten custom ops. ``CppWrapperGpu`` intercepts them and either emits
+# inline CUDA/HIP runtime calls or raises a compile-time unsupported-op error.
 make_fallback(torch.ops.streams.record_event.default)
 make_fallback(torch.ops.streams.wait_event.default)
 make_fallback(torch.ops.streams.synchronize_event.default)
 make_fallback(torch.ops.streams.synchronize_device.default)
+make_fallback(torch.ops.streams.synchronize_stream.default)
+make_fallback(torch.ops.streams.wait_stream.default)
 
 
 @register_lowering(aten.rand)
@@ -3010,6 +3016,7 @@ def inductor_random(
                 ops.index_expr(random_pos(index), torch.int32),
                 vec=int(vec),
             )
+
     else:
 
         def inner_fn(index):

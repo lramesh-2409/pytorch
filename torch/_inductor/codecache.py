@@ -42,7 +42,6 @@ from types import (
     ModuleType,
 )
 from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import NotRequired, override, Self, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
@@ -129,6 +128,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import NotRequired, override, Self, TypedDict
 
 from .cache_key import (
     CODE_CACHE_KEY_STRATEGY,
@@ -913,6 +913,7 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
+                    "codegen/aoti_runtime/streams.h",
                     "script.ld",
                 )
                 inductor_root = os.path.dirname(__file__)
@@ -1873,8 +1874,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
-        | None = None,
+        evaluate_guards: (
+            Callable[[str, list[int] | list[torch.SymInt]], bool] | None
+        ) = None,
     ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -2106,8 +2108,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         remote_cache: RemoteCache[JsonDataTy] | None,
         is_backward: bool,
         constants: CompiledFxGraphConstants,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
-        | None = None,
+        evaluate_guards: (
+            Callable[[str, list[int] | list[torch.SymInt]], bool] | None
+        ) = None,
     ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -4080,9 +4083,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         return [
             f"halide_buffer_t {name};",
-            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
-            if len(dims) > 0
-            else f"halide_dimension_t * {name}_dims = nullptr;",
+            (
+                f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
+                if len(dims) > 0
+                else f"halide_dimension_t * {name}_dims = nullptr;"
+            ),
             f"{name}.device = {device};",
             f"{name}.device_interface = {device_interface};",
             f"{name}.host = {host};",
@@ -4302,7 +4307,6 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         so_file = str(dirpath / libname)
         if not os.path.exists(done_file):
             import halide as hl  # type: ignore[import-untyped,import-not-found]
-
             from torch.utils._filelock import FileLock
 
             with FileLock(lock_file, LOCK_TIMEOUT):
