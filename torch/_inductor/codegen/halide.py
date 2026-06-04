@@ -1036,6 +1036,7 @@ class HalideKernel(SIMDKernel):
                     sym,
                     (
                         SymT.UNBACKED_INT,
+                        SymT.UNBACKED_FLOAT,
                         SymT.SIZE,
                         SymT.PRECOMPUTED_SIZE,
                     ),
@@ -1181,7 +1182,14 @@ class HalideKernel(SIMDKernel):
             elif symbol_is_type(sym, SymT.HALIDE):
                 used_dims.add(sym)
             elif symbol_is_type(
-                sym, (SymT.UNBACKED_INT, SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.INDEX)
+                sym,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.UNBACKED_FLOAT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                    SymT.INDEX,
+                ),
             ):
                 pass
             else:
