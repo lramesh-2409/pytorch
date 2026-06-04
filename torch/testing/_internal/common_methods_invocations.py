@@ -16182,9 +16182,7 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_native_group_norm,
         skips=(
             # native_group_norm expects contiguous inputs
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
             # likely due to dispatching through infinitely_differentiable_native_group_norm_backward
             DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", device_type="mps", dtypes=(torch.float32,)),
             # lazy dispatch failure
@@ -26829,12 +26827,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.native_group_norm",
         skips=(
-            # The torch implementation does not return a view, while the reference does
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback"),
+            # MPS variance/rstd calculation produces different results than CPU/CUDA/ref
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref", device_type="mps", dtypes=(torch.float32,)),
         ),
         torch_opinfo_name="native_group_norm",
+        # One returned tensor is a view, but not a view of an input, so it's OK.
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
