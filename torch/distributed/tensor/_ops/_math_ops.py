@@ -428,10 +428,11 @@ NON_LINEAR_BOOL_REDUCTION_OPS = [
 ]
 
 
-# @register_single_dim_strategy(
-#     list(LINEAR_REDUCTION_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    list(LINEAR_REDUCTION_OP_MAP.keys()),
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def linear_reduction_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -457,6 +458,7 @@ def linear_reduction_single_dim_strategy(
     )
 
 
+# TODO: foreach translation can't resolve aten.max.default correctly for reductions.
 # register_single_dim_strategy(
 #     [aten._foreach_max.default],
 #     schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
@@ -464,10 +466,11 @@ def linear_reduction_single_dim_strategy(
 # )(linear_reduction_single_dim_strategy)
 
 
-# @register_single_dim_strategy(
-#     NON_LINEAR_BOOL_REDUCTION_OPS, schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    NON_LINEAR_BOOL_REDUCTION_OPS,
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def bool_reduction_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -573,6 +576,12 @@ def max_min_dim_single_dim_strategy(
     return _shard_non_reduction_dim(args_schema, dim, keep_dim, n_outputs=2)
 
 
+# TODO: re-enable once argminmax_handler is updated to honor the propagator's
+# redistribute plan. The custom handler in _nonlinear_redux.py bypasses
+# redistribute_local_args, so a single-dim Shard output_spec from this strategy
+# is not actually materialized (handler produces a Replicate-shaped local),
+# leading to mismatched placement/local-shape and a crash in full_tensor().
+# See discussion in the PR thread.
 # @register_single_dim_strategy(
 #     list(ARGMAX_ARGMIN_OPS.keys()),
 #     schema_info=RuntimeSchemaInfo(1),
@@ -682,11 +691,11 @@ _SOFTMAX_FWD_N_PLACEMENTS = 2
 _SOFTMAX_BWD_N_PLACEMENTS = 3
 
 
-# @register_single_dim_strategy(
-#     [aten.cumsum.default, aten.cumprod.default, aten.logcumsumexp.default],
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.cumsum.default, aten.cumprod.default, aten.logcumsumexp.default],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def scan_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -723,11 +732,11 @@ def scan_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 # Category J: Global reductions (reduce all dims to scalar)
-# @register_single_dim_strategy(
-#     [aten.median.default, aten.nanmedian.default],
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.median.default, aten.nanmedian.default],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def global_median_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -779,11 +788,11 @@ def kthvalue_strategy(
     return _shard_non_reduction_dim(args_schema, dim, keep_dim, n_outputs=2)
 
 
-# @register_single_dim_strategy(
-#     [aten.cummax.default, aten.cummin.default],
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.cummax.default, aten.cummin.default],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def cummax_cummin_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -816,11 +825,11 @@ _STD_VAR_OPS = [
 
 
 # Category D: Non-linear reductions
-# @register_single_dim_strategy(
-#     _STD_VAR_OPS,
-#     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    _STD_VAR_OPS,
+    schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
+    allow_uneven_sharding=True,
+)
 def std_var_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -884,11 +893,11 @@ def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
 
 
 # Category E: Norm reductions
-# @register_single_dim_strategy(
-#     [aten.linalg_vector_norm.default, aten.norm.Scalar],
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.linalg_vector_norm.default, aten.norm.Scalar],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def vector_norm_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -922,7 +931,7 @@ def vector_norm_single_dim_strategy(
     )
 
 
-# Foreach variant reuses the same strategy; infra handles per-element dispatch.
+# TODO: foreach translation can't resolve aten.norm.Scalar (no aten.norm.default).
 # register_single_dim_strategy(
 #     [aten._foreach_norm.Scalar],
 #     schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
@@ -982,10 +991,11 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     return TupleStrategy(output_tuple_strategy_children)
 
 
-# @register_single_dim_strategy(
-#     [aten.linalg__powsum.default], schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.linalg__powsum.default],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def powsum_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -1010,6 +1020,7 @@ def powsum_single_dim_strategy(
     )
 
 
+# TODO: foreach translation can't resolve aten.linalg__powsum (no aten.powsum).
 # register_single_dim_strategy(
 #     [aten._foreach_powsum.Scalar],
 #     schema_info=RuntimeSchemaInfo(1, needs_pytree=True),
@@ -1121,11 +1132,11 @@ _REPLICATE_ONLY_OPS = [
 
 
 # Category H: Replicate-only ops
-# @register_single_dim_strategy(
-#     _REPLICATE_ONLY_OPS,
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    _REPLICATE_ONLY_OPS,
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def linalg_replicate_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -1224,11 +1235,11 @@ MAX_POOL_OPS = [
 
 
 # Category G: Pooling ops
-# @register_single_dim_strategy(
-#     AVG_POOL_OPS + MAX_POOL_OPS,
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    AVG_POOL_OPS + MAX_POOL_OPS,
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def pooling_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -1293,11 +1304,11 @@ def pooling_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 # Category F: Softmax-like ops
-# @register_single_dim_strategy(
-#     [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def softmax_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -1352,14 +1363,14 @@ def softmax_strategy(op_schema: OpSchema) -> OpStrategy:
     return output_strategy
 
 
-# @register_single_dim_strategy(
-#     [
-#         aten._log_softmax_backward_data.default,
-#         aten._softmax_backward_data.default,
-#     ],
-#     schema_info=RuntimeSchemaInfo(2),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [
+        aten._log_softmax_backward_data.default,
+        aten._softmax_backward_data.default,
+    ],
+    schema_info=RuntimeSchemaInfo(2),
+    allow_uneven_sharding=True,
+)
 def softmax_backward_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -1430,6 +1441,7 @@ def softmax_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     return grad_in_strategy
 
 
+# TODO: needs investigation — test_nll_loss_and_cross_entropy fails
 # @register_single_dim_strategy(
 #     [aten.nll_loss_forward.default, aten.nll_loss2d_forward.default],
 #     schema_info=RuntimeSchemaInfo(3),
@@ -1625,6 +1637,7 @@ def nll_loss_forward_strategy(op_schema: OpSchema) -> OpStrategy:
     return output_strategy
 
 
+# TODO: needs investigation — test_nll_loss_backward_comm_counts fails
 # @register_single_dim_strategy(
 #     [aten.nll_loss_backward.default, aten.nll_loss2d_backward.default],
 #     schema_info=RuntimeSchemaInfo(4),
@@ -1997,11 +2010,11 @@ def _norm_forward_single_dim_strategy(
     return strategies
 
 
-# @register_single_dim_strategy(
-#     [aten.native_layer_norm.default],
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.native_layer_norm.default],
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def layer_norm_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -2010,6 +2023,7 @@ def layer_norm_single_dim_strategy(
     return _norm_forward_single_dim_strategy(op, args_schema, kwargs_schema)
 
 
+# TODO: _fused_ prefix causes single_dim infra to misidentify this as a foreach op.
 # @register_single_dim_strategy(
 #     [aten._fused_rms_norm.default],
 #     schema_info=RuntimeSchemaInfo(1),
@@ -2385,6 +2399,7 @@ def _norm_backward_single_dim_strategy(
     return strategies
 
 
+# TODO: optional outputs (output_mask) — single_dim infra requires TensorMeta for all outputs.
 # @register_single_dim_strategy(
 #     [aten.native_layer_norm_backward.default],
 #     schema_info=RuntimeSchemaInfo(2),
@@ -2451,11 +2466,11 @@ def fused_rms_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
     return _common_norm_backward_strategy(op_schema, rms_norm=True)
 
 
-# @register_single_dim_strategy(
-#     [aten.topk.default],
-#     schema_info=RuntimeSchemaInfo(2),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.topk.default],
+    schema_info=RuntimeSchemaInfo(2),
+    allow_uneven_sharding=True,
+)
 def topk_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -2467,11 +2482,11 @@ def topk_single_dim_strategy(
     )
 
 
-# @register_single_dim_strategy(
-#     aten.sort.default,
-#     schema_info=RuntimeSchemaInfo(1),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    aten.sort.default,
+    schema_info=RuntimeSchemaInfo(1),
+    allow_uneven_sharding=True,
+)
 def sort_default_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -2483,14 +2498,14 @@ def sort_default_single_dim_strategy(
     )
 
 
-# @register_single_dim_strategy(
-#     aten.sort.stable,
-#     schema_info=RuntimeSchemaInfo(
-#         1,
-#         static_kwargkey=["dim", "descending", "stable"],
-#     ),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    aten.sort.stable,
+    schema_info=RuntimeSchemaInfo(
+        1,
+        static_kwargkey=["dim", "descending", "stable"],
+    ),
+    allow_uneven_sharding=True,
+)
 def sort_stable_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -2564,11 +2579,11 @@ def sort_stable_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 # Category L: Histc
-# @register_single_dim_strategy(
-#     [aten.histc.default],
-#     schema_info=RuntimeSchemaInfo(2),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.histc.default],
+    schema_info=RuntimeSchemaInfo(2),
+    allow_uneven_sharding=True,
+)
 def histc_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
@@ -2610,14 +2625,14 @@ def histc_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
-# @register_single_dim_strategy(
-#     [aten.logsumexp.default],
-#     schema_info=RuntimeSchemaInfo(
-#         static_argnum=1,
-#         static_kwargkey=["keepdim"],
-#     ),
-#     allow_uneven_sharding=True,
-# )
+@register_single_dim_strategy(
+    [aten.logsumexp.default],
+    schema_info=RuntimeSchemaInfo(
+        static_argnum=1,
+        static_kwargkey=["keepdim"],
+    ),
+    allow_uneven_sharding=True,
+)
 def logsumexp_single_dim_strategy(
     op: torch._ops.OpOverload,
     args_schema: tuple[Any, ...],
