@@ -587,6 +587,11 @@ class AOTInductorModelContainer {
     // constant as we walk.
     size_t main_blob_idx = 0;
     size_t aux_cpu_blob_idx = 0;
+#ifdef USE_CUDA
+    // Opt-in pinned async staging pool for the delta-update H2D copies below.
+    // nullptr (default / on allocation failure) keeps the throttled path.
+    auto _staging_pool = tryMakeConstantsStagingPool();
+#endif
     for (size_t idx = 0; idx < num_constants; idx++) {
       if (models_[0]->constant_from_folded(static_cast<int64_t>(idx))) {
         continue;
@@ -689,11 +694,42 @@ class AOTInductorModelContainer {
         offset = constants_internal_offset_[this_main_idx] /
             aoti_torch_dtype_element_size(dtype);
 #elif USE_CUDA
-        aoti_cuda_memcpy_throttled(
-            internal_constants_ptr,
-            user_constant_ptr,
-            static_cast<size_t>(constant_size),
-            cudaMemcpyDefault);
+        if (_staging_pool != nullptr) {
+          // user_constant_ptr may be host or device memory. Only stage
+          // through pinned buffers when the source is pageable host; device
+          // or already-pinned sources go straight to an async copy on the
+          // pool stream.
+          cudaPointerAttributes _attrs{};
+          cudaError_t _prc =
+              cudaPointerGetAttributes(&_attrs, user_constant_ptr);
+          bool _src_is_pageable_host = false;
+          if (_prc != cudaSuccess) {
+            (void)cudaGetLastError();
+            _src_is_pageable_host = true;
+          } else {
+            _src_is_pageable_host =
+                (_attrs.type == cudaMemoryTypeUnregistered);
+          }
+          if (_src_is_pageable_host) {
+            _staging_pool->copyH2DViaStage(
+                internal_constants_ptr,
+                user_constant_ptr,
+                static_cast<size_t>(constant_size));
+          } else {
+            AOTI_RUNTIME_CUDA_CHECK(cudaMemcpyAsync(
+                internal_constants_ptr,
+                user_constant_ptr,
+                static_cast<size_t>(constant_size),
+                cudaMemcpyDefault,
+                _staging_pool->stream()));
+          }
+        } else {
+          aoti_cuda_memcpy_throttled(
+              internal_constants_ptr,
+              user_constant_ptr,
+              static_cast<size_t>(constant_size),
+              cudaMemcpyDefault);
+        }
 #else
         memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
 #endif
@@ -718,6 +754,11 @@ class AOTInductorModelContainer {
       target.map->insert_or_assign(
           constant_name, RAIIAtenTensorHandle(tensor_handle));
     }
+#ifdef USE_CUDA
+    // Synchronize the staging stream and release the pinned buffers before the
+    // updated constants are observed by callers.
+    _staging_pool.reset();
+#endif
     target.update_array(models_[0].get());
   }
 
